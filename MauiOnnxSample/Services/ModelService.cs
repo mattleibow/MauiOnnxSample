@@ -3,22 +3,29 @@ using Microsoft.Extensions.Logging;
 namespace MauiOnnxSample.Services;
 
 /// <summary>
-/// Manages the ONNX model lifecycle: detects whether model files are available as MAUI assets,
-/// extracts them to app data storage on first run, and provides the ready path.
+/// Manages the ONNX model lifecycle: detects whether model files are available, extracts them
+/// from MAUI assets to app data storage on first run, and provides the ready directory path.
+///
+/// Priority order for finding the model:
+///   1. Already-extracted model in AppDataDirectory (fastest, skips re-extraction)
+///   2. Development override path: ~/Documents/phi-3.5-mini/ (for dev without bundled assets)
+///   3. MAUI assets embedded in the app bundle (production path, copies to AppDataDirectory)
 /// </summary>
 public class ModelService : IModelService
 {
     private const string ModelFolderName = "phi-3.5-mini";
     private const string AssetPrefix = "Models/" + ModelFolderName + "/";
 
-    /// <summary>Required model files that must be present for the model to function.</summary>
-    private static readonly string[] RequiredModelFiles =
-    [
-        "model.onnx",
-        "genai_config.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-    ];
+    /// <summary>
+    /// Development override path. If model files are present here, they are used directly
+    /// without being copied to AppDataDirectory. This avoids embedding the ~2.8 GB model
+    /// in the app bundle during development and speeds up iteration.
+    ///
+    /// To use: place all model files (genai_config.json, *.onnx, *.onnx.data, tokenizer.json,
+    /// tokenizer_config.json) in ~/Documents/phi-3.5-mini/
+    /// </summary>
+    private static readonly string DevModelPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "phi-3.5-mini");
 
     private readonly ILogger<ModelService> _logger;
     private string? _modelPath;
@@ -36,64 +43,43 @@ public class ModelService : IModelService
     {
         try
         {
+            // 1. Check already-extracted AppDataDirectory path
             var destDir = Path.Combine(FileSystem.AppDataDirectory, "Models", ModelFolderName);
             Directory.CreateDirectory(destDir);
 
-            // Check if all required files are already extracted
-            if (AreAllModelFilesPresent(destDir))
+            if (IsModelDirectoryReady(destDir))
             {
                 _logger.LogInformation("Model already extracted at {Path}", destDir);
-                _modelPath = destDir;
-                IsModelReady = true;
-                progress?.Report("Model ready.");
+                SetReady(destDir, progress);
                 return true;
             }
 
-            progress?.Report("Extracting model from app package...");
-            _logger.LogInformation("Extracting model to {Path}", destDir);
-
-            // Attempt to list and copy assets from the app package
-            foreach (var fileName in RequiredModelFiles)
+            // 2. Development override: use ~/Documents/phi-3.5-mini/ directly if present
+            if (IsModelDirectoryReady(DevModelPath))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var assetPath = AssetPrefix + fileName;
-                var destPath = Path.Combine(destDir, fileName);
-
-                if (File.Exists(destPath))
-                {
-                    _logger.LogDebug("Skipping already-extracted {File}", fileName);
-                    continue;
-                }
-
-                try
-                {
-                    using var assetStream = await FileSystem.OpenAppPackageFileAsync(assetPath);
-                    using var fileStream = File.Create(destPath);
-                    progress?.Report($"Extracting {fileName}...");
-                    await assetStream.CopyToAsync(fileStream, cancellationToken);
-                    _logger.LogInformation("Extracted {File}", fileName);
-                }
-                catch (FileNotFoundException)
-                {
-                    _logger.LogWarning("Asset not found: {Asset} — model may not be bundled", assetPath);
-                }
-            }
-
-            // Also copy any additional files (like model.onnx.data which is large)
-            await TryCopyLargeAssetAsync("model.onnx.data", destDir, progress, cancellationToken);
-            await TryCopyLargeAssetAsync("special_tokens_map.json", destDir, progress, cancellationToken);
-
-            if (AreAllModelFilesPresent(destDir))
-            {
-                _modelPath = destDir;
-                IsModelReady = true;
-                progress?.Report("Model extraction complete.");
-                _logger.LogInformation("Model ready at {Path}", destDir);
+                _logger.LogInformation("Using dev model at {Path}", DevModelPath);
+                SetReady(DevModelPath, progress);
                 return true;
             }
 
-            _logger.LogWarning("Model files missing. Run the download script to obtain model files.");
-            progress?.Report("Model files not found. See README.txt in Resources/Raw/Models/phi-3.5-mini/");
+            // 3. Extract from MAUI assets (production path)
+            progress?.Report("Extracting model from app bundle...");
+            _logger.LogInformation("Extracting model assets to {Path}", destDir);
+
+            var anyExtracted = await ExtractAllAssetsAsync(destDir, progress, cancellationToken);
+
+            if (IsModelDirectoryReady(destDir))
+            {
+                SetReady(destDir, progress);
+                return true;
+            }
+
+            var hint = IsModelDirectoryReady(DevModelPath)
+                ? "Dev path exists but is incomplete."
+                : $"Run scripts/download-model.sh and place files in {DevModelPath}";
+
+            _logger.LogWarning("Model not ready after extraction attempt. {Hint}", hint);
+            progress?.Report($"⚠️ Model not found. {hint}");
             return false;
         }
         catch (OperationCanceledException)
@@ -103,32 +89,82 @@ public class ModelService : IModelService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to prepare model");
-            progress?.Report($"Error preparing model: {ex.Message}");
+            progress?.Report($"Error: {ex.Message}");
             return false;
         }
     }
 
-    private async Task TryCopyLargeAssetAsync(string fileName, string destDir, IProgress<string>? progress, CancellationToken cancellationToken)
-    {
-        var destPath = Path.Combine(destDir, fileName);
-        if (File.Exists(destPath))
-            return;
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
-        var assetPath = AssetPrefix + fileName;
-        try
-        {
-            using var assetStream = await FileSystem.OpenAppPackageFileAsync(assetPath);
-            using var fileStream = File.Create(destPath);
-            progress?.Report($"Extracting {fileName} (large file, please wait)...");
-            await assetStream.CopyToAsync(fileStream, cancellationToken);
-            _logger.LogInformation("Extracted large file {File}", fileName);
-        }
-        catch (FileNotFoundException)
-        {
-            _logger.LogDebug("Optional asset not found: {Asset}", assetPath);
-        }
+    private void SetReady(string path, IProgress<string>? progress)
+    {
+        _modelPath = path;
+        IsModelReady = true;
+        progress?.Report("Model ready.");
+        _logger.LogInformation("Model ready at {Path}", path);
     }
 
-    private static bool AreAllModelFilesPresent(string directory) =>
-        RequiredModelFiles.All(f => File.Exists(Path.Combine(directory, f)));
+    /// <summary>
+    /// A model directory is "ready" when it contains genai_config.json and at least one .onnx file.
+    /// onnxruntime-genai resolves the exact filename from genai_config.json at load time.
+    /// </summary>
+    private static bool IsModelDirectoryReady(string directory) =>
+        Directory.Exists(directory) &&
+        File.Exists(Path.Combine(directory, "genai_config.json")) &&
+        Directory.EnumerateFiles(directory, "*.onnx").Any();
+
+    /// <summary>
+    /// Enumerates known asset filenames for the model and copies any that exist in the
+    /// app bundle to the destination directory.
+    /// </summary>
+    private async Task<bool> ExtractAllAssetsAsync(string destDir, IProgress<string>? progress, CancellationToken ct)
+    {
+        // These are all the files expected in the phi-3.5-mini-instruct ONNX package.
+        // onnxruntime-genai resolves the actual .onnx filename from genai_config.json.
+        var candidates = new[]
+        {
+            "genai_config.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "config.json",
+            "configuration_phi3.py",
+            // Standard name (some HF exports use this)
+            "model.onnx",
+            "model.onnx.data",
+            // Phi-3.5 specific names
+            "phi-3.5-mini-instruct-cpu-int4-awq-block-128-acc-level-4.onnx",
+            "phi-3.5-mini-instruct-cpu-int4-awq-block-128-acc-level-4.onnx.data",
+            "phi-3.5-mini-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx",
+            "phi-3.5-mini-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx.data",
+        };
+
+        var anyFound = false;
+        foreach (var fileName in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            var dest = Path.Combine(destDir, fileName);
+            if (File.Exists(dest))
+            {
+                anyFound = true;
+                continue;
+            }
+
+            var assetPath = AssetPrefix + fileName;
+            try
+            {
+                using var src = await FileSystem.OpenAppPackageFileAsync(assetPath);
+                using var dst = File.Create(dest);
+                progress?.Report($"Extracting {fileName}...");
+                await src.CopyToAsync(dst, ct);
+                _logger.LogInformation("Extracted asset: {File}", fileName);
+                anyFound = true;
+            }
+            catch (FileNotFoundException)
+            {
+                _logger.LogDebug("Asset not bundled: {Asset}", assetPath);
+            }
+        }
+        return anyFound;
+    }
 }

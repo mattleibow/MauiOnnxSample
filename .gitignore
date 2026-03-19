@@ -423,3 +423,9 @@ MauiOnnxSample/Platforms/MacCatalyst/NativeLibraries/
 MauiOnnxSample/Platforms/iOS/NativeLibraries/
 MauiOnnxSample/Platforms/Android/NativeLibraries/
 MauiOnnxSample/Platforms/Windows/NativeLibraries/
+
+# ONNX model files (large, download via scripts/download-model.sh)
+MauiOnnxSample/Resources/Raw/Models/**/*.onnx
+MauiOnnxSample/Resources/Raw/Models/**/*.onnx.data
+MauiOnnxSample/Resources/Raw/Models/**/*.json
+MauiOnnxSample/Resources/Raw/Models/**/*.py

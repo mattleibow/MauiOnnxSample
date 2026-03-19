@@ -92,6 +92,7 @@ public class ChatViewModel : INotifyPropertyChanged
         {
             IsModelLoading = false;
             OnPropertyChanged(nameof(IsModelReady));
+            SendCommand.ChangeCanExecute(); // re-evaluate CanSend now that model is ready
 
             if (ready)
             {

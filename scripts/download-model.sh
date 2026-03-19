@@ -1,49 +1,77 @@
 #!/usr/bin/env bash
 # Download Phi-3.5-mini-instruct ONNX model for MauiOnnxSample
+#
+# The model can be placed in ONE of two locations:
+#   1. Dev path (fastest - no rebuild needed):
+#      ~/Documents/phi-3.5-mini/
+#      ModelService checks this first at runtime.
+#
+#   2. Embedded as MauiAsset (production path, requires rebuild):
+#      MauiOnnxSample/Resources/Raw/Models/phi-3.5-mini/
+#      These files are bundled in the app and extracted to AppDataDirectory on first run.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-MODEL_DIR="$REPO_ROOT/MauiOnnxSample/Resources/Raw/Models/phi-3.5-mini"
 
-echo "Downloading Phi-3.5-mini-instruct ONNX model..."
-echo "Destination: $MODEL_DIR"
+# Default: dev path (no rebuild required)
+DEV_PATH="$HOME/Documents/phi-3.5-mini"
+ASSET_PATH="$REPO_ROOT/MauiOnnxSample/Resources/Raw/Models/phi-3.5-mini"
+
+TARGET="${1:-dev}"
+case "$TARGET" in
+  dev)    DEST="$DEV_PATH" ;;
+  assets) DEST="$ASSET_PATH" ;;
+  *)      echo "Usage: $0 [dev|assets]"; exit 1 ;;
+esac
+
+mkdir -p "$DEST"
+echo "Downloading Phi-3.5-mini-instruct ONNX model (cpu-int4-awq)..."
+echo "Destination: $DEST"
 echo ""
 
-# Check for huggingface-cli
+REPO="microsoft/Phi-3.5-mini-instruct-onnx"
+SUBFOLDER="cpu_and_mobile/cpu-int4-awq-block-128-acc-level-4"
+TMP="/tmp/phi35-onnx-download"
+
 if command -v huggingface-cli &> /dev/null; then
     echo "Using huggingface-cli..."
-    huggingface-cli download microsoft/Phi-3.5-mini-instruct-onnx \
-        --include "cpu-int4-rtn-block-32-acc-level-4/*" \
-        --local-dir /tmp/phi35-onnx
-
-    cp /tmp/phi35-onnx/cpu-int4-rtn-block-32-acc-level-4/* "$MODEL_DIR/"
+    huggingface-cli download "$REPO" \
+        --include "${SUBFOLDER}/*" \
+        --local-dir "$TMP"
 elif command -v python3 &> /dev/null; then
     echo "Using Python huggingface_hub..."
-    python3 -c "
+    python3 - << PYEOF
 from huggingface_hub import snapshot_download
 snapshot_download(
-    repo_id='microsoft/Phi-3.5-mini-instruct-onnx',
-    allow_patterns=['cpu-int4-rtn-block-32-acc-level-4/*'],
-    local_dir='/tmp/phi35-onnx'
+    repo_id='$REPO',
+    allow_patterns=['${SUBFOLDER}/*'],
+    local_dir='$TMP'
 )
-import shutil, os
-src = '/tmp/phi35-onnx/cpu-int4-rtn-block-32-acc-level-4'
-dst = '$MODEL_DIR'
-for f in os.listdir(src):
-    shutil.copy2(os.path.join(src, f), os.path.join(dst, f))
-"
+PYEOF
 else
     echo "ERROR: Neither huggingface-cli nor python3 found."
     echo "Install with: pip install huggingface_hub"
     echo ""
     echo "Alternatively, manually download from:"
-    echo "  https://huggingface.co/microsoft/Phi-3.5-mini-instruct-onnx/tree/main/cpu-int4-rtn-block-32-acc-level-4"
-    echo "  to: $MODEL_DIR"
+    echo "  https://huggingface.co/$REPO/tree/main/$SUBFOLDER"
+    echo "  to: $DEST"
     exit 1
 fi
 
 echo ""
-echo "Model downloaded successfully to: $MODEL_DIR"
-echo "You can now build and run the MauiOnnxSample app."
+echo "Copying files to $DEST ..."
+cp "$TMP/$SUBFOLDER/"* "$DEST/"
+echo ""
+echo "Model downloaded to: $DEST"
+
+if [ "$TARGET" = "dev" ]; then
+    echo ""
+    echo "Dev path ready. ModelService will use this location automatically at runtime."
+    echo "No rebuild needed."
+else
+    echo ""
+    echo "Assets ready. Rebuild the app to bundle the model (adds ~2.8 GB to the app)."
+    echo "  dotnet build MauiOnnxSample -f net11.0-maccatalyst -c Debug"
+fi

@@ -50,7 +50,8 @@ public class ChatService : IChatService, IDisposable
         _logger = logger;
     }
 
-    public bool IsReady => _modelService.IsModelReady && _chatClient is not null;
+    // IsReady is true as soon as the model is prepared; the chat client is created lazily on first use.
+    public bool IsReady => _modelService.IsModelReady;
 
     /// <summary>Lazily initializes the IChatClient when the model is ready (thread-safe).</summary>
     private IChatClient GetOrCreateChatClient()
