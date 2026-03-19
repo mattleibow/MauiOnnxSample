@@ -38,6 +38,9 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -61,11 +64,37 @@
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="11.0.0-preview.2.*" />
+		<PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.12.2" />
+		<PackageReference Include="Microsoft.Extensions.AI" Version="10.4.1" />
+		<PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.0.1" />
 		<PackageReference Include="Redth.MauiDevFlow.Agent" Version="*" Condition="'$(Configuration)' == 'Debug'" />
 	</ItemGroup>
 
 	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst' and '$(Configuration)' == 'Debug'">
 		<CodeSignEntitlements>Platforms/MacCatalyst/Entitlements.plist</CodeSignEntitlements>
 	</PropertyGroup>
+
+	<!-- Mac Catalyst native ONNX Runtime GenAI framework -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
+		<NativeReference Include="Platforms\MacCatalyst\NativeLibraries\onnxruntime-genai.xcframework">
+			<Kind>Framework</Kind>
+			<SmartLink>False</SmartLink>
+		</NativeReference>
+	</ItemGroup>
+
+	<!-- iOS native ONNX Runtime GenAI framework -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+		<NativeReference Include="Platforms\iOS\NativeLibraries\onnxruntime-genai.xcframework">
+			<Kind>Framework</Kind>
+			<SmartLink>False</SmartLink>
+		</NativeReference>
+	</ItemGroup>
+
+	<!-- Android native ONNX Runtime GenAI AAR -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+		<AndroidLibrary Include="Platforms\Android\NativeLibraries\onnxruntime-genai.aar">
+			<Bind>false</Bind>
+		</AndroidLibrary>
+	</ItemGroup>
 
 </Project>
