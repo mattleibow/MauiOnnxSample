@@ -1,0 +1,156 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFrameworks>net11.0-android</TargetFrameworks>
+		<TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net11.0-ios;net11.0-maccatalyst</TargetFrameworks>
+		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net11.0-windows10.0.19041.0</TargetFrameworks>
+
+		<!-- Note for MacCatalyst:
+		The default runtime is maccatalyst-x64, except in Release config, in which case the default is maccatalyst-x64;maccatalyst-arm64.
+		When specifying both architectures, use the plural <RuntimeIdentifiers> instead of the singular <RuntimeIdentifier>.
+		The Mac App Store will NOT accept apps with ONLY maccatalyst-arm64 indicated;
+		either BOTH runtimes must be indicated or ONLY macatalyst-x64. -->
+		<!-- For example: <RuntimeIdentifiers>maccatalyst-x64;maccatalyst-arm64</RuntimeIdentifiers> -->
+
+		<OutputType>Exe</OutputType>
+		<RootNamespace>MauiOnnxSample</RootNamespace>
+		<UseMaui>true</UseMaui>
+		<SingleProject>true</SingleProject>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+
+		<!-- Display name -->
+		<ApplicationTitle>MauiOnnxSample</ApplicationTitle>
+
+		<!-- App Identifier -->
+		<ApplicationId>com.companyname.mauionnxsample</ApplicationId>
+
+		<!-- Versions -->
+		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
+
+		<!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
+		<WindowsPackageType>None</WindowsPackageType>
+
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">17.0</SupportedOSPlatformVersion>
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- App Icon -->
+		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+
+		<!-- Splash Screen -->
+		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+
+		<!-- Images -->
+		<MauiImage Include="Resources\Images\*" />
+		<MauiImage Update="Resources\Images\dotnet_bot.png" Resize="True" BaseSize="300,185" />
+		
+		<!-- Custom Fonts -->
+		<MauiFont Include="Resources\Fonts\*" />
+
+		<!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
+		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="11.0.0-preview.2.*" />
+
+		<!--
+		  WHY TWO OnnxRuntimeGenAI references (investigation findings):
+
+		  The Microsoft.ML.OnnxRuntimeGenAI NuGet package ships MSBuild targets for native
+		  platform linking, but they have two problems for net11.0 MAUI targets:
+
+		  PROBLEM 1 – Mac Catalyst is deliberately excluded (build/net9.0-maccatalyst14.0/_._):
+		    The package author put an empty marker file for Mac Catalyst, meaning no NativeReference
+		    is auto-added for that platform. Manual NativeReference items are always required for
+		    Mac Catalyst regardless of what .NET version you use. This is by design.
+
+		  PROBLEM 2 – iOS/Android targets exist (net9.0-ios15.4, net9.0-android31.0) but the iOS
+		    target specifies Kind=Static, ForceLoad=True for the onnxruntime-genai.xcframework.zip.
+		    That xcframework contains a DYNAMIC Mach-O shared library (confirmed via `file` and `nm`),
+		    not a static archive. ForceLoad=True on a dynamic library causes mtouch to add all
+		    P/Invoke-declared symbols to the linker's initial-undefines list, but those symbols are
+		    resolved at runtime (not link time), causing undefined symbol linker errors.
+
+		  PROBLEM 3 – The full package transitively depends on Microsoft.ML.OnnxRuntime.Managed,
+		    which adds P/Invoke declarations for _RegisterCustomOps and other internal OnnxRuntime
+		    symbols. On Mac Catalyst (no auto NativeReference), these symbols can never be satisfied
+		    at link time, causing linker failure.
+
+		  SOLUTION:
+		    1. Use .Managed only (no OnnxRuntime.Managed transitive dep → no conflicting P/Invoke).
+		    2. Reference the full package with ExcludeAssets="all" — this ONLY downloads the 136 MB
+		       package to the NuGet cache during 'dotnet restore'. No build targets or assets are
+		       applied to the project. The cache paths are then used by the manual items below.
+		    3. Manual NativeReference/AndroidLibrary/Content items with correct metadata replace
+		       the auto-targets entirely, using Kind=Framework + SmartLink=False for the dynamic
+		       xcframework (resolves symbols at runtime via dyld, not the static linker).
+
+		  No binary files are committed to this repository. All native libs come from NuGet restore.
+		-->
+		<PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.12.2" />
+		<PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.12.2"
+		                  ExcludeAssets="all"
+		                  PrivateAssets="all" />
+		<PackageReference Include="Microsoft.Extensions.AI" Version="10.4.1" />
+		<PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.0.1" />
+		<PackageReference Include="Redth.MauiDevFlow.Agent" Version="*" Condition="'$(Configuration)' == 'Debug'" />
+	</ItemGroup>
+
+	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst' and '$(Configuration)' == 'Debug'">
+		<CodeSignEntitlements>Platforms/MacCatalyst/Entitlements.plist</CodeSignEntitlements>
+	</PropertyGroup>
+
+	<!--
+	  Manual native library wiring. $(NuGetPackageRoot) → ~/.nuget/packages/ (set by NuGet restore).
+
+	  iOS + Mac Catalyst: onnxruntime-genai.xcframework is a DYNAMIC Mach-O shared library.
+	    Kind=Framework tells mtouch to link it as a dynamic framework (-framework flag).
+	    SmartLink=False prevents mtouch from force-checking P/Invoke symbols at link time;
+	    they are resolved by the dynamic linker (dyld) at app launch instead.
+	    (The package's own iOS targets incorrectly set Kind=Static + ForceLoad=True, which would
+	    cause undefined symbol errors for the dynamic library's P/Invoke declarations.)
+
+	  Android: AndroidLibrary + Bind=false adds the AAR to the APK without generating C# bindings.
+
+	  Windows: Content items copy the native DLL next to the exe. The full package's net8.0 props
+	  use <None> (not <Content>), which doesn't reliably copy for MAUI unpackaged apps.
+	-->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst' OR $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+		<NativeReference Include="$(NuGetPackageRoot)microsoft.ml.onnxruntimegenai/0.12.2/runtimes/ios/native/onnxruntime-genai.xcframework.zip">
+			<Kind>Framework</Kind>
+			<SmartLink>False</SmartLink>
+		</NativeReference>
+	</ItemGroup>
+
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+		<AndroidLibrary Include="$(NuGetPackageRoot)microsoft.ml.onnxruntimegenai/0.12.2/runtimes/android/native/onnxruntime-genai.aar">
+			<Bind>false</Bind>
+		</AndroidLibrary>
+	</ItemGroup>
+
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+		<Content Include="$(NuGetPackageRoot)microsoft.ml.onnxruntimegenai/0.12.2/runtimes/win-x64/native/onnxruntime-genai.dll"
+		         Condition="'$(PlatformTarget)' == 'x64' OR '$(PlatformTarget)' == 'AnyCPU' OR '$(PlatformTarget)' == ''">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Link>onnxruntime-genai.dll</Link>
+		</Content>
+		<Content Include="$(NuGetPackageRoot)microsoft.ml.onnxruntimegenai/0.12.2/runtimes/win-arm64/native/onnxruntime-genai.dll"
+		         Condition="'$(PlatformTarget)' == 'ARM64'">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Link>onnxruntime-genai.dll</Link>
+		</Content>
+	</ItemGroup>
+
+</Project>

@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="MauiOnnxSample.Pages.ChatPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:vm="clr-namespace:MauiOnnxSample.ViewModels"
+    xmlns:models="clr-namespace:MauiOnnxSample.Models"
+    Title="AI Chat"
+    BackgroundColor="{AppThemeBinding Light={StaticResource Gray100}, Dark={StaticResource Gray900}}">
+
+    <ContentPage.Resources>
+        <!-- User bubble style -->
+        <Style x:Key="UserBubble" TargetType="Border">
+            <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#512BD4, Dark=#7B5EA7}" />
+            <Setter Property="StrokeThickness" Value="0" />
+            <Setter Property="StrokeShape">
+                <Setter.Value>
+                    <RoundRectangle CornerRadius="18,18,4,18" />
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Padding" Value="14,10" />
+            <Setter Property="Margin" Value="60,4,12,4" />
+            <Setter Property="HorizontalOptions" Value="End" />
+            <Setter Property="MaximumWidthRequest" Value="320" />
+        </Style>
+
+        <!-- AI bubble style -->
+        <Style x:Key="AIBubble" TargetType="Border">
+            <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=White, Dark={StaticResource Gray800}}" />
+            <Setter Property="Stroke" Value="{AppThemeBinding Light={StaticResource Gray200}, Dark={StaticResource Gray700}}" />
+            <Setter Property="StrokeThickness" Value="1" />
+            <Setter Property="StrokeShape">
+                <Setter.Value>
+                    <RoundRectangle CornerRadius="18,18,18,4" />
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Padding" Value="14,10" />
+            <Setter Property="Margin" Value="12,4,60,4" />
+            <Setter Property="HorizontalOptions" Value="Start" />
+            <Setter Property="MaximumWidthRequest" Value="320" />
+        </Style>
+
+        <!-- User message text -->
+        <Style x:Key="UserText" TargetType="Label">
+            <Setter Property="TextColor" Value="White" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="LineBreakMode" Value="WordWrap" />
+        </Style>
+
+        <!-- AI message text -->
+        <Style x:Key="AIText" TargetType="Label">
+            <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource Gray900}, Dark=White}" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="LineBreakMode" Value="WordWrap" />
+        </Style>
+
+        <!-- Timestamp label -->
+        <Style x:Key="TimestampLabel" TargetType="Label">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource Gray500}, Dark={StaticResource Gray400}}" />
+            <Setter Property="Margin" Value="16,0,16,2" />
+        </Style>
+    </ContentPage.Resources>
+
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <!-- Status/loading banner -->
+        <Grid
+            Grid.Row="0"
+            BackgroundColor="{AppThemeBinding Light={StaticResource Gray200}, Dark={StaticResource Gray800}}"
+            Padding="12,8"
+            IsVisible="{Binding IsModelLoading}">
+            <Grid ColumnDefinitions="Auto,*">
+                <ActivityIndicator
+                    Grid.Column="0"
+                    IsRunning="{Binding IsModelLoading}"
+                    Color="{StaticResource Primary}"
+                    WidthRequest="20"
+                    HeightRequest="20"
+                    Margin="0,0,8,0" />
+                <Label
+                    Grid.Column="1"
+                    Text="{Binding StatusMessage}"
+                    VerticalOptions="Center"
+                    FontSize="13"
+                    TextColor="{AppThemeBinding Light={StaticResource Gray700}, Dark={StaticResource Gray300}}" />
+            </Grid>
+        </Grid>
+
+        <!-- Chat message list -->
+        <CollectionView
+            Grid.Row="1"
+            ItemsSource="{Binding Messages}"
+            x:Name="MessagesCollection"
+            Margin="0,8,0,0">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:ChatMessageViewModel">
+                    <Grid Padding="0,2">
+                        <!-- User message -->
+                        <VerticalStackLayout
+                            HorizontalOptions="End"
+                            IsVisible="{Binding IsUser}">
+                            <Label
+                                Text="{Binding AuthorLabel}"
+                                Style="{StaticResource TimestampLabel}"
+                                HorizontalOptions="End" />
+                            <Border Style="{StaticResource UserBubble}">
+                                <Label
+                                    Text="{Binding Text}"
+                                    Style="{StaticResource UserText}" />
+                            </Border>
+                        </VerticalStackLayout>
+
+                        <!-- AI message -->
+                        <VerticalStackLayout
+                            HorizontalOptions="Start"
+                            IsVisible="{Binding IsAssistant}">
+                            <Grid ColumnDefinitions="Auto,Auto" Margin="16,0,0,0">
+                                <Label
+                                    Grid.Column="0"
+                                    Text="{Binding AuthorLabel}"
+                                    Style="{StaticResource TimestampLabel}"
+                                    Margin="0" />
+                                <ActivityIndicator
+                                    Grid.Column="1"
+                                    IsRunning="{Binding IsStreaming}"
+                                    IsVisible="{Binding IsStreaming}"
+                                    Color="{StaticResource Primary}"
+                                    WidthRequest="14"
+                                    HeightRequest="14"
+                                    Margin="6,0,0,0"
+                                    VerticalOptions="Center" />
+                            </Grid>
+                            <Border Style="{StaticResource AIBubble}">
+                                <Label
+                                    Text="{Binding Text}"
+                                    Style="{StaticResource AIText}" />
+                            </Border>
+                        </VerticalStackLayout>
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <!-- Input area -->
+        <Border
+            Grid.Row="2"
+            BackgroundColor="{AppThemeBinding Light=White, Dark={StaticResource Gray800}}"
+            Stroke="{AppThemeBinding Light={StaticResource Gray200}, Dark={StaticResource Gray700}}"
+            StrokeThickness="1"
+            StrokeShape="RoundRectangle 0"
+            Padding="12,8">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+
+                <!-- Text input -->
+                <Border
+                    Grid.Column="0"
+                    BackgroundColor="{AppThemeBinding Light={StaticResource Gray100}, Dark={StaticResource Gray700}}"
+                    Stroke="{AppThemeBinding Light={StaticResource Gray300}, Dark={StaticResource Gray600}}"
+                    StrokeThickness="1"
+                    StrokeShape="RoundRectangle 20"
+                    Padding="14,8">
+                    <Editor
+                        x:Name="MessageInput"
+                        Text="{Binding InputText}"
+                        Placeholder="Ask me anything..."
+                        PlaceholderColor="{AppThemeBinding Light={StaticResource Gray400}, Dark={StaticResource Gray500}}"
+                        BackgroundColor="Transparent"
+                        AutoSize="TextChanges"
+                        MinimumHeightRequest="36"
+                        MaximumHeightRequest="120"
+                        Completed="OnEditorCompleted"
+                        IsEnabled="{Binding IsModelLoading, Converter={StaticResource InvertedBoolConverter}}" />
+                </Border>
+
+                <!-- Stop button (visible when generating) -->
+                <Button
+                    Grid.Column="1"
+                    Text="⏹"
+                    Command="{Binding StopCommand}"
+                    IsVisible="{Binding IsBusy}"
+                    FontSize="18"
+                    BackgroundColor="{AppThemeBinding Light={StaticResource Gray200}, Dark={StaticResource Gray700}}"
+                    TextColor="{AppThemeBinding Light={StaticResource Gray700}, Dark=White}"
+                    CornerRadius="20"
+                    WidthRequest="44"
+                    HeightRequest="44"
+                    Padding="0" />
+
+                <!-- Send button -->
+                <Button
+                    Grid.Column="2"
+                    Text="↑"
+                    Command="{Binding SendCommand}"
+                    IsVisible="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}"
+                    FontSize="20"
+                    FontAttributes="Bold"
+                    BackgroundColor="{StaticResource Primary}"
+                    TextColor="White"
+                    CornerRadius="22"
+                    WidthRequest="44"
+                    HeightRequest="44"
+                    Padding="0" />
+            </Grid>
+        </Border>
+
+    </Grid>
+</ContentPage>

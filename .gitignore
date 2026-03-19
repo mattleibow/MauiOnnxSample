@@ -416,3 +416,10 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# ONNX Runtime GenAI native libraries (restored from NuGet package at build time)
+# See: https://www.nuget.org/packages/Microsoft.ML.OnnxRuntimeGenAI
+MauiOnnxSample/Platforms/MacCatalyst/NativeLibraries/
+MauiOnnxSample/Platforms/iOS/NativeLibraries/
+MauiOnnxSample/Platforms/Android/NativeLibraries/
+MauiOnnxSample/Platforms/Windows/NativeLibraries/
