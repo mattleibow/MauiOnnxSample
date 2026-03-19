@@ -176,11 +176,8 @@ public class ChatViewModel : INotifyPropertyChanged
             fullResponse.Append(chunk);
             var currentText = fullResponse.ToString();
 
-            MainThread.BeginInvokeOnMainThread(() =>
-            {
-                aiMessage.Text = currentText;
-                OnPropertyChanged(nameof(Messages));
-            });
+            // aiMessage implements INotifyPropertyChanged — UI updates automatically
+            MainThread.BeginInvokeOnMainThread(() => aiMessage.Text = currentText);
         }
 
         var finalText = fullResponse.ToString();
@@ -188,7 +185,6 @@ public class ChatViewModel : INotifyPropertyChanged
         {
             aiMessage.Text = finalText;
             aiMessage.IsStreaming = false;
-            OnPropertyChanged(nameof(Messages));
         });
 
         _chatHistory.Add(new ChatMessage(ChatRole.Assistant, finalText));

@@ -33,6 +33,7 @@ public class ChatService : IChatService, IDisposable
     private readonly FaqService _faqService;
     private readonly ChatTools _chatTools;
     private readonly ILogger<ChatService> _logger;
+    private readonly Lock _clientLock = new();
 
     private IChatClient? _chatClient;
     private bool _disposed;
@@ -51,30 +52,37 @@ public class ChatService : IChatService, IDisposable
 
     public bool IsReady => _modelService.IsModelReady && _chatClient is not null;
 
-    /// <summary>Lazily initializes the IChatClient when the model is ready.</summary>
+    /// <summary>Lazily initializes the IChatClient when the model is ready (thread-safe).</summary>
     private IChatClient GetOrCreateChatClient()
     {
         if (_chatClient is not null)
             return _chatClient;
 
-        if (!_modelService.IsModelReady || _modelService.ModelPath is null)
-            throw new InvalidOperationException("Model is not ready. Call IModelService.PrepareModelAsync() first.");
+        lock (_clientLock)
+        {
+            // Double-checked locking
+            if (_chatClient is not null)
+                return _chatClient;
 
-        var onnxClient = new OnnxRuntimeGenAIChatClient(_modelService.ModelPath,
-            new OnnxRuntimeGenAIChatClientOptions
-            {
-                StopSequences = ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>", "<|endoftext|>"],
-                EnableCaching = false,
-            });
+            if (!_modelService.IsModelReady || _modelService.ModelPath is null)
+                throw new InvalidOperationException("Model is not ready. Call IModelService.PrepareModelAsync() first.");
 
-        // Wrap with FunctionInvokingChatClient for automatic tool execution
-        _chatClient = onnxClient
-            .AsBuilder()
-            .UseFunctionInvocation()
-            .Build();
+            var onnxClient = new OnnxRuntimeGenAIChatClient(_modelService.ModelPath,
+                new OnnxRuntimeGenAIChatClientOptions
+                {
+                    StopSequences = ["<|system|>", "<|user|>", "<|assistant|>", "<|end|>", "<|endoftext|>"],
+                    EnableCaching = false,
+                });
 
-        _logger.LogInformation("Chat client initialized from model at {Path}", _modelService.ModelPath);
-        return _chatClient;
+            // Wrap with FunctionInvokingChatClient for automatic tool execution
+            _chatClient = onnxClient
+                .AsBuilder()
+                .UseFunctionInvocation()
+                .Build();
+
+            _logger.LogInformation("Chat client initialized from model at {Path}", _modelService.ModelPath);
+            return _chatClient;
+        }
     }
 
     /// <inheritdoc/>
@@ -85,7 +93,7 @@ public class ChatService : IChatService, IDisposable
     {
         var client = GetOrCreateChatClient();
 
-        var messages = BuildMessages(history, userMessage);
+        var messages = BuildMessages(history);
         var options = BuildChatOptions();
 
         _logger.LogDebug("Sending streaming message, history={Count}", messages.Count);
@@ -106,7 +114,7 @@ public class ChatService : IChatService, IDisposable
     {
         var client = GetOrCreateChatClient();
 
-        var messages = BuildMessages(history, userMessage);
+        var messages = BuildMessages(history);
         var options = BuildChatOptions();
 
         _logger.LogDebug("Sending structured message for type {Type}", typeof(T).Name);
@@ -117,10 +125,11 @@ public class ChatService : IChatService, IDisposable
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private List<ChatMessage> BuildMessages(IList<ChatMessage> history, string userMessage)
+    private List<ChatMessage> BuildMessages(IList<ChatMessage> history)
     {
-        // Retrieve relevant FAQ context for this message
-        var faqContext = _faqService.BuildContextBlock(userMessage);
+        // Use the last user message as the query for FAQ retrieval
+        var lastUserText = history.LastOrDefault(m => m.Role == ChatRole.User)?.Text ?? string.Empty;
+        var faqContext = _faqService.BuildContextBlock(lastUserText);
 
         var systemContent = string.IsNullOrEmpty(faqContext)
             ? SystemPrompt
@@ -131,14 +140,14 @@ public class ChatService : IChatService, IDisposable
             new(ChatRole.System, systemContent)
         };
 
-        // Add conversation history (skip any existing system messages)
+        // Add conversation history (skip any existing system messages).
+        // The caller is responsible for ensuring userMessage is already the last
+        // entry in history before calling this method — do NOT append it again.
         foreach (var msg in history)
         {
             if (msg.Role != ChatRole.System)
                 messages.Add(msg);
         }
-
-        messages.Add(new ChatMessage(ChatRole.User, userMessage));
 
         return messages;
     }
@@ -152,9 +161,12 @@ public class ChatService : IChatService, IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        (_chatClient as IDisposable)?.Dispose();
-        _chatClient = null;
+        lock (_clientLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            (_chatClient as IDisposable)?.Dispose();
+            _chatClient = null;
+        }
     }
 }

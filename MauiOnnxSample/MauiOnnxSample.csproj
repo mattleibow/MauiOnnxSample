@@ -97,4 +97,18 @@
 		</AndroidLibrary>
 	</ItemGroup>
 
+	<!-- Windows native ONNX Runtime GenAI DLL (x64 and arm64) -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+		<Content Include="Platforms\Windows\NativeLibraries\x64\onnxruntime-genai.dll"
+		         Condition="'$(PlatformTarget)' == 'x64' OR '$(PlatformTarget)' == 'AnyCPU' OR '$(PlatformTarget)' == ''">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Link>onnxruntime-genai.dll</Link>
+		</Content>
+		<Content Include="Platforms\Windows\NativeLibraries\arm64\onnxruntime-genai.dll"
+		         Condition="'$(PlatformTarget)' == 'ARM64'">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Link>onnxruntime-genai.dll</Link>
+		</Content>
+	</ItemGroup>
+
 </Project>
