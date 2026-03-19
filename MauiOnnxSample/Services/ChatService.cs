@@ -380,14 +380,84 @@ public class ChatService : IChatService, IDisposable
         CancellationToken cancellationToken = default)
     {
         var client = GetOrCreateChatClient();
-
         var messages = BuildMessages(history);
         var options = BuildChatOptions();
+        var tools = options.Tools?.OfType<AIFunction>().ToList() ?? [];
 
-        _logger.LogDebug("Sending structured message for type {Type}", typeof(T).Name);
+        _logger.LogInformation("SendStructuredMessage: type={Type}, {MsgCount} messages, {ToolCount} tools",
+            typeof(T).Name, messages.Count, tools.Count);
 
-        var response = await client.GetResponseAsync<T>(messages, options, cancellationToken: cancellationToken);
-        return response.Result;
+        // Step 1: Run the tool-invocation loop to collect real data before requesting JSON.
+        const int maxIterations = 5;
+        for (int iteration = 0; iteration < maxIterations; iteration++)
+        {
+            var response = await client.GetResponseAsync(messages, options, cancellationToken);
+            var funcCalls = response.Messages.SelectMany(m => m.Contents.OfType<FunctionCallContent>()).ToList();
+
+            if (funcCalls.Count == 0)
+            {
+                _logger.LogInformation("SendStructuredMessage: no tool calls at iteration {N}, proceeding to JSON format", iteration);
+                break;
+            }
+
+            _logger.LogInformation("SendStructuredMessage: iteration {N}, {Count} tool call(s)", iteration, funcCalls.Count);
+            messages.Add(new ChatMessage(ChatRole.Assistant, [.. funcCalls.Cast<AIContent>()]));
+
+            var resultContents = new List<AIContent>();
+            foreach (var fcc in funcCalls)
+            {
+                _logger.LogInformation("SendStructuredMessage: invoking tool '{Name}'", fcc.Name);
+                var tool = tools.FirstOrDefault(t => string.Equals(t.Name, fcc.Name, StringComparison.OrdinalIgnoreCase));
+                string resultText;
+                if (tool is null)
+                {
+                    _logger.LogWarning("SendStructuredMessage: tool '{Name}' not found", fcc.Name);
+                    resultText = $"Tool '{fcc.Name}' is not available.";
+                }
+                else
+                {
+                    try
+                    {
+                        var raw = await tool.InvokeAsync(new AIFunctionArguments(fcc.Arguments), cancellationToken);
+                        resultText = raw?.ToString() ?? string.Empty;
+                        _logger.LogInformation("SendStructuredMessage: tool '{Name}' returned: {Result}", fcc.Name, resultText);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "SendStructuredMessage: tool '{Name}' threw: {Msg}", fcc.Name, ex.Message);
+                        resultText = $"Tool error: {ex.Message}";
+                    }
+                }
+                resultContents.Add(new FunctionResultContent(fcc.CallId, resultText));
+            }
+            messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+        }
+
+        // Step 2: Append a fill-in JSON template so the model outputs structured data.
+        var props = typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        var templateParts = props.Select(p =>
+        {
+            var jsonAttr = p.GetCustomAttributes(typeof(System.Text.Json.Serialization.JsonPropertyNameAttribute), false)
+                            .OfType<System.Text.Json.Serialization.JsonPropertyNameAttribute>()
+                            .FirstOrDefault();
+            var key = jsonAttr?.Name ?? p.Name;
+            var placeholder = p.PropertyType == typeof(string) ? $"\"<{key}>\"" :
+                              p.PropertyType == typeof(double) || p.PropertyType == typeof(float) ? "0.0" :
+                              p.PropertyType == typeof(int) ? "0" : "null";
+            return $"\"{key}\": {placeholder}";
+        });
+        var template = "{\n  " + string.Join(",\n  ", templateParts) + "\n}";
+
+        messages.Add(new ChatMessage(ChatRole.User,
+            $"Now format the collected data as JSON. Respond with ONLY the JSON object — no prose, no markdown. Fill in real values from the tool results:\n{template}"));
+
+        _logger.LogInformation("SendStructuredMessage: requesting JSON, template={Template}",
+            template[..Math.Min(120, template.Length)]);
+
+        // Step 3: Get JSON-formatted response and deserialize.
+        var jsonResponse = await client.GetResponseAsync<T>(messages, options, cancellationToken: cancellationToken);
+        _logger.LogInformation("SendStructuredMessage: result={Result}", jsonResponse.Result);
+        return jsonResponse.Result;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

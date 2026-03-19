@@ -25,7 +25,7 @@ public class ChatTools
     [Description("Gets the user's current GPS location as latitude and longitude coordinates.")]
     public async Task<string> GetCurrentLocation()
     {
-        _logger.LogInformation("GetCurrentLocation: INVOKED by FICH");
+        _logger.LogInformation("GetCurrentLocation: INVOKED");
         try
         {
             // Dispatch to main thread to satisfy Mac Catalyst location requirements,
@@ -89,6 +89,7 @@ public class ChatTools
         [Description("The longitude coordinate (e.g. -122.3321 for Seattle)")]
         double longitude)
     {
+        _logger.LogInformation("GetWeather: INVOKED with lat={Lat}, lon={Lon}", latitude, longitude);
         try
         {
             var (tempC, humidity, windKmh, conditions) =
@@ -96,12 +97,15 @@ public class ChatTools
 
             double tempF = tempC * 9.0 / 5.0 + 32.0;
 
-            return $"Weather at ({latitude:F4}, {longitude:F4}): " +
+            var result = $"Weather at ({latitude:F4}, {longitude:F4}): " +
                    $"{tempC:F1}°C ({tempF:F1}°F), {conditions}. " +
                    $"Humidity: {humidity}%. Wind: {windKmh:F1} km/h.";
+            _logger.LogInformation("GetWeather: result='{Result}'", result);
+            return result;
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "GetWeather: Exception: {Msg}", ex.Message);
             return $"Failed to fetch weather: {ex.Message}";
         }
     }
@@ -112,7 +116,7 @@ public class ChatTools
         [Description("The theme to switch to: 'dark', 'light', or 'system'")]
         string theme)
     {
-        _logger.LogInformation("SwitchTheme: INVOKED by FICH with theme='{Theme}'", theme);
+        _logger.LogInformation("SwitchTheme: INVOKED with theme='{Theme}'", theme);
         string result;
         var normalizedTheme = theme.Trim().ToLowerInvariant();
 

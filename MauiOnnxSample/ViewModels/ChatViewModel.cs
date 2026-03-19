@@ -227,9 +227,10 @@ public class ChatViewModel : INotifyPropertyChanged
                 }
             });
         }
-        catch
+        catch (Exception ex)
         {
-            // Fall back to streaming if structured output fails
+            // Fall back to streaming if structured output fails (model returned text instead of JSON)
+            _logger.LogWarning(ex, "Structured weather response failed, falling back to streaming: {Msg}", ex.Message);
             MainThread.BeginInvokeOnMainThread(() =>
             {
                 if (Messages.LastOrDefault() is { IsAssistant: true } placeholder)
