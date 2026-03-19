@@ -101,13 +101,12 @@ public class ChatService : IChatService, IDisposable
                     EnableCaching = false,
                 });
 
-            // Pipeline: FunctionInvokingChatClient → Phi4ToolCallParserClient → OnnxRuntimeGenAIChatClient
-            // Phi4ToolCallParserClient converts the model's text tool-call markers into FunctionCallContent,
-            // which FunctionInvokingChatClient then detects and invokes automatically.
+            // Pipeline: Phi4ToolCallParserClient → OnnxRuntimeGenAIChatClient
+            // Phi4ToolCallParserClient converts the model's text tool-call markers into FunctionCallContent.
+            // Tool invocation is handled manually in SendStreamingMessageAsync for reliability.
             _chatClient = onnxClient
                 .AsBuilder()
                 .Use(inner => new Phi4ToolCallParserClient(inner, _parserLogger))
-                .UseFunctionInvocation()
                 .Build();
 
             _logger.LogInformation("Chat client initialized from model at {Path}", _modelService.ModelPath);
@@ -283,18 +282,95 @@ public class ChatService : IChatService, IDisposable
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var client = GetOrCreateChatClient();
-
         var messages = BuildMessages(history);
         var options = BuildChatOptions();
+        var tools = options.Tools?.OfType<AIFunction>().ToList() ?? [];
 
-        _logger.LogDebug("Sending streaming message, history={Count}", messages.Count);
+        _logger.LogInformation("SendStreamingMessage: {MsgCount} messages, {ToolCount} tools",
+            messages.Count, tools.Count);
 
-        await foreach (var update in client.GetStreamingResponseAsync(messages, options, cancellationToken))
+        const int maxIterations = 5;
+        for (int iteration = 0; iteration < maxIterations; iteration++)
         {
-            var text = update.Text;
-            if (!string.IsNullOrEmpty(text))
-                yield return text;
+            _logger.LogInformation("SendStreamingMessage: iteration {N}, messages={Count}",
+                iteration, messages.Count);
+
+            // Collect the full streaming response (parser buffers and converts tool calls).
+            var funcCallContents = new List<FunctionCallContent>();
+            var textParts = new List<string>();
+
+            await foreach (var update in client.GetStreamingResponseAsync(messages, options, cancellationToken))
+            {
+                foreach (var content in update.Contents)
+                {
+                    if (content is FunctionCallContent fcc)
+                    {
+                        funcCallContents.Add(fcc);
+                        _logger.LogInformation("SendStreamingMessage: tool call detected: {Name}({Args})",
+                            fcc.Name,
+                            fcc.Arguments is null ? "" : string.Join(", ", fcc.Arguments.Select(kv => $"{kv.Key}={kv.Value}")));
+                    }
+                    else if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                    {
+                        textParts.Add(tc.Text);
+                    }
+                }
+            }
+
+            if (funcCallContents.Count == 0)
+            {
+                // No tool calls — this is the final text response.
+                _logger.LogInformation("SendStreamingMessage: no tool calls, returning {Words} text chunk(s)", textParts.Count);
+                foreach (var part in textParts)
+                    yield return part;
+                yield break;
+            }
+
+            // Add assistant's tool-call message to conversation.
+            messages.Add(new ChatMessage(ChatRole.Assistant,
+                [.. funcCallContents.Cast<AIContent>()]));
+
+            // Invoke each tool and collect results.
+            var toolResultContents = new List<AIContent>();
+            foreach (var fcc in funcCallContents)
+            {
+                _logger.LogInformation("SendStreamingMessage: invoking tool '{Name}'", fcc.Name);
+
+                var tool = tools.FirstOrDefault(t =>
+                    string.Equals(t.Name, fcc.Name, StringComparison.OrdinalIgnoreCase));
+
+                string resultText;
+                if (tool is null)
+                {
+                    _logger.LogWarning("SendStreamingMessage: tool '{Name}' not found in options.Tools", fcc.Name);
+                    resultText = $"Tool '{fcc.Name}' is not available.";
+                }
+                else
+                {
+                    try
+                    {
+                        var raw = await tool.InvokeAsync(
+                            new AIFunctionArguments(fcc.Arguments),
+                            cancellationToken);
+                        resultText = raw?.ToString() ?? string.Empty;
+                        _logger.LogInformation("SendStreamingMessage: tool '{Name}' returned: {Result}",
+                            fcc.Name, resultText);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "SendStreamingMessage: tool '{Name}' threw: {Msg}", fcc.Name, ex.Message);
+                        resultText = $"Tool error: {ex.Message}";
+                    }
+                }
+
+                toolResultContents.Add(new FunctionResultContent(fcc.CallId, resultText));
+            }
+
+            // Add tool results to conversation and loop for the model's follow-up response.
+            messages.Add(new ChatMessage(ChatRole.Tool, toolResultContents));
         }
+
+        _logger.LogWarning("SendStreamingMessage: reached max iterations ({Max})", maxIterations);
     }
 
     /// <inheritdoc/>
