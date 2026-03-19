@@ -64,7 +64,22 @@
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="11.0.0-preview.2.*" />
+		<!--
+		  Two OnnxRuntimeGenAI references are intentional:
+		    1. .Managed: provides the C# P/Invoke bindings (IChatClient, OnnxRuntimeGenAIChatClient,
+		       etc.) and critically does NOT pull in Microsoft.ML.OnnxRuntime.Managed as a transitive
+		       dependency. That package adds P/Invoke declarations for symbols not publicly exported
+		       by the dynamic xcframework, which causes linker failures on iOS/Mac Catalyst.
+		    2. Full package with ExcludeAssets="all": ensures NuGet downloads the 136 MB package
+		       during 'dotnet restore' so the native runtime files are available in the global cache
+		       at the paths referenced by the NativeReference/AndroidLibrary/Content items below.
+		       No assets (compile, runtime, build, native) are included in the build from this entry.
+		       No binary files are committed to this repository.
+		-->
 		<PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.Managed" Version="0.12.2" />
+		<PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.12.2"
+		                  ExcludeAssets="all"
+		                  PrivateAssets="all" />
 		<PackageReference Include="Microsoft.Extensions.AI" Version="10.4.1" />
 		<PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.0.1" />
 		<PackageReference Include="Redth.MauiDevFlow.Agent" Version="*" Condition="'$(Configuration)' == 'Debug'" />
@@ -74,37 +89,33 @@
 		<CodeSignEntitlements>Platforms/MacCatalyst/Entitlements.plist</CodeSignEntitlements>
 	</PropertyGroup>
 
-	<!-- Mac Catalyst native ONNX Runtime GenAI framework -->
-	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
-		<NativeReference Include="Platforms\MacCatalyst\NativeLibraries\onnxruntime-genai.xcframework">
+	<!--
+	  Native library references from the NuGet package cache.
+	  $(NuGetPackageRoot) is set by NuGet during restore (typically ~/.nuget/packages/).
+	  Kind=Framework, SmartLink=False: this is a Mach-O dynamic shared library; SmartLink=False
+	  prevents the build system from adding P/Invoke symbol names to the linker's initial-undefines
+	  list, allowing the dynamic linker to resolve them at runtime instead of link time.
+	-->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst' OR $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+		<NativeReference Include="$(NuGetPackageRoot)microsoft.ml.onnxruntimegenai/0.12.2/runtimes/ios/native/onnxruntime-genai.xcframework.zip">
 			<Kind>Framework</Kind>
 			<SmartLink>False</SmartLink>
 		</NativeReference>
 	</ItemGroup>
 
-	<!-- iOS native ONNX Runtime GenAI framework -->
-	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-		<NativeReference Include="Platforms\iOS\NativeLibraries\onnxruntime-genai.xcframework">
-			<Kind>Framework</Kind>
-			<SmartLink>False</SmartLink>
-		</NativeReference>
-	</ItemGroup>
-
-	<!-- Android native ONNX Runtime GenAI AAR -->
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
-		<AndroidLibrary Include="Platforms\Android\NativeLibraries\onnxruntime-genai.aar">
+		<AndroidLibrary Include="$(NuGetPackageRoot)microsoft.ml.onnxruntimegenai/0.12.2/runtimes/android/native/onnxruntime-genai.aar">
 			<Bind>false</Bind>
 		</AndroidLibrary>
 	</ItemGroup>
 
-	<!-- Windows native ONNX Runtime GenAI DLL (x64 and arm64) -->
 	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
-		<Content Include="Platforms\Windows\NativeLibraries\x64\onnxruntime-genai.dll"
+		<Content Include="$(NuGetPackageRoot)microsoft.ml.onnxruntimegenai/0.12.2/runtimes/win-x64/native/onnxruntime-genai.dll"
 		         Condition="'$(PlatformTarget)' == 'x64' OR '$(PlatformTarget)' == 'AnyCPU' OR '$(PlatformTarget)' == ''">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<Link>onnxruntime-genai.dll</Link>
 		</Content>
-		<Content Include="Platforms\Windows\NativeLibraries\arm64\onnxruntime-genai.dll"
+		<Content Include="$(NuGetPackageRoot)microsoft.ml.onnxruntimegenai/0.12.2/runtimes/win-arm64/native/onnxruntime-genai.dll"
 		         Condition="'$(PlatformTarget)' == 'ARM64'">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 			<Link>onnxruntime-genai.dll</Link>
