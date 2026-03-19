@@ -8,12 +8,12 @@ namespace MauiOnnxSample.Services;
 ///
 /// Priority order for finding the model:
 ///   1. Already-extracted model in AppDataDirectory (fastest, skips re-extraction)
-///   2. Development override path: ~/Documents/phi-3.5-mini/ (for dev without bundled assets)
+///   2. Development override path: ~/Documents/phi-4-mini/ (for dev without bundled assets)
 ///   3. MAUI assets embedded in the app bundle (production path, copies to AppDataDirectory)
 /// </summary>
 public class ModelService : IModelService
 {
-    private const string ModelFolderName = "phi-3.5-mini";
+    private const string ModelFolderName = "phi-4-mini";
     private const string AssetPrefix = "Models/" + ModelFolderName + "/";
 
     /// <summary>
@@ -21,11 +21,11 @@ public class ModelService : IModelService
     /// without being copied to AppDataDirectory. This avoids embedding the ~2.8 GB model
     /// in the app bundle during development and speeds up iteration.
     ///
-    /// To use: place all model files (genai_config.json, *.onnx, *.onnx.data, tokenizer.json,
-    /// tokenizer_config.json) in ~/Documents/phi-3.5-mini/
+    /// To use: place all model files (genai_config.json, model.onnx, model.onnx.data,
+    /// tokenizer.json, tokenizer_config.json) in ~/Documents/phi-4-mini/
     /// </summary>
     private static readonly string DevModelPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "phi-3.5-mini");
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "phi-4-mini");
 
     private readonly ILogger<ModelService> _logger;
     private string? _modelPath;
@@ -119,7 +119,7 @@ public class ModelService : IModelService
     /// </summary>
     private async Task<bool> ExtractAllAssetsAsync(string destDir, IProgress<string>? progress, CancellationToken ct)
     {
-        // These are all the files expected in the phi-3.5-mini-instruct ONNX package.
+        // These are all the files expected in the Phi-4-mini-instruct ONNX package.
         // onnxruntime-genai resolves the actual .onnx filename from genai_config.json.
         var candidates = new[]
         {
@@ -127,16 +127,14 @@ public class ModelService : IModelService
             "tokenizer.json",
             "tokenizer_config.json",
             "special_tokens_map.json",
+            "added_tokens.json",
             "config.json",
             "configuration_phi3.py",
-            // Standard name (some HF exports use this)
+            "merges.txt",
+            "vocab.json",
+            // Phi-4-mini uses standard model.onnx naming
             "model.onnx",
             "model.onnx.data",
-            // Phi-3.5 specific names
-            "phi-3.5-mini-instruct-cpu-int4-awq-block-128-acc-level-4.onnx",
-            "phi-3.5-mini-instruct-cpu-int4-awq-block-128-acc-level-4.onnx.data",
-            "phi-3.5-mini-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx",
-            "phi-3.5-mini-instruct-cpu-int4-rtn-block-32-acc-level-4.onnx.data",
         };
 
         var anyFound = false;

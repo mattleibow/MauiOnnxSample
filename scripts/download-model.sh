@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Download Phi-3.5-mini-instruct ONNX model for MauiOnnxSample
+# Download Phi-4-mini-instruct ONNX model for MauiOnnxSample
 #
 # The model can be placed in ONE of two locations:
 #   1. Dev path (fastest - no rebuild needed):
-#      ~/Documents/phi-3.5-mini/
+#      ~/Documents/phi-4-mini/
 #      ModelService checks this first at runtime.
 #
 #   2. Embedded as MauiAsset (production path, requires rebuild):
-#      MauiOnnxSample/Resources/Raw/Models/phi-3.5-mini/
+#      MauiOnnxSample/Resources/Raw/Models/phi-4-mini/
 #      These files are bundled in the app and extracted to AppDataDirectory on first run.
 
 set -e
@@ -16,8 +16,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Default: dev path (no rebuild required)
-DEV_PATH="$HOME/Documents/phi-3.5-mini"
-ASSET_PATH="$REPO_ROOT/MauiOnnxSample/Resources/Raw/Models/phi-3.5-mini"
+DEV_PATH="$HOME/Documents/phi-4-mini"
+ASSET_PATH="$REPO_ROOT/MauiOnnxSample/Resources/Raw/Models/phi-4-mini"
 
 TARGET="${1:-dev}"
 case "$TARGET" in
@@ -27,13 +27,13 @@ case "$TARGET" in
 esac
 
 mkdir -p "$DEST"
-echo "Downloading Phi-3.5-mini-instruct ONNX model (cpu-int4-awq)..."
+echo "Downloading Phi-4-mini-instruct ONNX model (cpu-int4-rtn-block-32)..."
 echo "Destination: $DEST"
 echo ""
 
-REPO="microsoft/Phi-3.5-mini-instruct-onnx"
-SUBFOLDER="cpu_and_mobile/cpu-int4-awq-block-128-acc-level-4"
-TMP="/tmp/phi35-onnx-download"
+REPO="microsoft/Phi-4-mini-instruct-onnx"
+SUBFOLDER="cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4"
+TMP="/tmp/phi4-onnx-download"
 
 if command -v huggingface-cli &> /dev/null; then
     echo "Using huggingface-cli..."

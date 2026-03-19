@@ -36,6 +36,7 @@ public static class MauiProgram
 
 #if DEBUG
 		builder.Logging.AddDebug();
+		builder.Logging.SetMinimumLevel(LogLevel.Debug);
 		builder.AddMauiDevFlowAgent();
 #endif
 

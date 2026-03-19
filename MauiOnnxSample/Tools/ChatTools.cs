@@ -2,6 +2,7 @@ using System.ComponentModel;
 using MauiOnnxSample.Models;
 using MauiOnnxSample.Services;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace MauiOnnxSample.Tools;
 
@@ -12,43 +13,70 @@ namespace MauiOnnxSample.Tools;
 public class ChatTools
 {
     private readonly WeatherService _weatherService;
+    private readonly ILogger<ChatTools> _logger;
 
-    public ChatTools(WeatherService weatherService)
+    public ChatTools(WeatherService weatherService, ILogger<ChatTools> logger)
     {
         _weatherService = weatherService;
+        _logger = logger;
     }
 
     /// <summary>Gets the device's current GPS location (latitude and longitude).</summary>
     [Description("Gets the user's current GPS location as latitude and longitude coordinates.")]
     public async Task<string> GetCurrentLocation()
     {
+        _logger.LogInformation("GetCurrentLocation: INVOKED by FICH");
         try
         {
-            var location = await Geolocation.GetLocationAsync(new GeolocationRequest
+            // Dispatch to main thread to satisfy Mac Catalyst location requirements,
+            // but race against a 10-second deadline so we never hang.
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var locationTask = MainThread.InvokeOnMainThreadAsync(async () =>
+                await Geolocation.GetLocationAsync(new GeolocationRequest
+                {
+                    DesiredAccuracy = GeolocationAccuracy.Medium,
+                    Timeout = TimeSpan.FromSeconds(8)
+                }));
+
+            Location? location;
+            try
             {
-                DesiredAccuracy = GeolocationAccuracy.Medium,
-                Timeout = TimeSpan.FromSeconds(10)
-            });
+                location = await locationTask.WaitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("GetCurrentLocation: timed out after 10 seconds");
+                return "Location request timed out. GPS may be unavailable.";
+            }
 
             if (location is null)
+            {
+                _logger.LogInformation("GetCurrentLocation: returned null location");
                 return "Unable to determine location. Location services may be disabled.";
+            }
 
-            return $"Current location: Latitude={location.Latitude:F4}, Longitude={location.Longitude:F4}";
+            var result = $"Current location: Latitude={location.Latitude:F4}, Longitude={location.Longitude:F4}";
+            _logger.LogInformation("GetCurrentLocation: {Result}", result);
+            return result;
         }
-        catch (FeatureNotSupportedException)
+        catch (FeatureNotSupportedException ex)
         {
+            _logger.LogWarning("GetCurrentLocation: FeatureNotSupported: {Msg}", ex.Message);
             return "GPS is not supported on this device.";
         }
-        catch (FeatureNotEnabledException)
+        catch (FeatureNotEnabledException ex)
         {
+            _logger.LogWarning("GetCurrentLocation: FeatureNotEnabled: {Msg}", ex.Message);
             return "GPS is not enabled. Please enable location services.";
         }
-        catch (PermissionException)
+        catch (PermissionException ex)
         {
+            _logger.LogWarning("GetCurrentLocation: PermissionDenied: {Msg}", ex.Message);
             return "Location permission was denied. Please grant location access in app settings.";
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "GetCurrentLocation: Exception: {Msg}", ex.Message);
             return $"Failed to get location: {ex.Message}";
         }
     }
@@ -84,6 +112,7 @@ public class ChatTools
         [Description("The theme to switch to: 'dark', 'light', or 'system'")]
         string theme)
     {
+        _logger.LogInformation("SwitchTheme: INVOKED by FICH with theme='{Theme}'", theme);
         string result;
         var normalizedTheme = theme.Trim().ToLowerInvariant();
 
@@ -97,6 +126,7 @@ public class ChatTools
         if (normalizedTheme != "dark" && normalizedTheme != "light" && normalizedTheme != "system")
         {
             result = $"Unknown theme '{theme}'. Use 'dark', 'light', or 'system'.";
+            _logger.LogWarning("SwitchTheme: unknown theme: {Theme}", theme);
             return Task.FromResult(result);
         }
 
@@ -110,6 +140,7 @@ public class ChatTools
             ? "Switched to system theme (follows OS setting)."
             : $"Switched to {normalizedTheme} theme.";
 
+        _logger.LogInformation("SwitchTheme: result='{Result}'", result);
         return Task.FromResult(result);
     }
 
